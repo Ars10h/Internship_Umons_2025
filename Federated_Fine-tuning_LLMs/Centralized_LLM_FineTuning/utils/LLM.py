@@ -1,86 +1,107 @@
-import textwrap
-import fireworks.client
-from typing import Tuple
-from fireworks.client.api import CompletionResponse
-
-############################ Fireworks ########################
-
-#######################################
 import os
-from dotenv import load_dotenv, find_dotenv
-def load_env():
-    _ = load_dotenv(find_dotenv())
+import textwrap
+from dotenv import load_dotenv
+import torch
+from transformers import (
+    AutoModelForSeq2SeqLM,
+    AutoTokenizer,
+    logging
+)
+from huggingface_hub import login
 
-def get_fireworks_api_key():
-    load_env()
-    fireworks_api_key = os.getenv("FIREWORKS_API_KEY")
-    return fireworks_api_key
-#############################################################
-
+# Configuration initiale
+load_dotenv()
+logging.set_verbosity_error()  # Réduire le logging verbeux
 
 class LLM_eval:
-    def __init__(self, model: str, **kwargs) -> None:
-        self.model = model
-        self.temp = 0
-        if "temp" in kwargs:
-            self.temp = kwargs.pop("temp")
-        fireworks.client.api_key = get_fireworks_api_key()
-        self.response = None
+    def __init__(self, model_id: str = "google/flan-t5-base", **kwargs):
+        print("[INIT] Initialisation de LLM_eval...")
+        self.device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"[INIT] Device utilisé : {self.device}")
+        self.model_id = model_id
+        self.temp = kwargs.get("temp", 0.7)
 
-    def eval(self, prompt, log_probs = False, verbose: bool=False, top_k: bool=True) -> None:
-        if verbose:
-            to_print = textwrap.fill(prompt, 50, subsequent_indent="\t")
-            print(f'Prompt:\n\t{to_print}')
-        self.response = fireworks.client.Completion.create(
-            model=self.model,
-            prompt=prompt,
-            echo = log_probs,
-            max_tokens=0 if log_probs else 80,
-            temperature=self.temp,
-            logprobs= 0,
-            top_k = 5 if top_k else None
+        # Authentification HF
+        print("[INIT] Authentification Hugging Face...")
+        self._authenticate()
+
+        # Chargement du tokenizer
+        print("[INIT] Chargement du tokenizer...")
+        self.tokenizer = self._load_tokenizer()
+
+        # Chargement du modèle
+        print("[INIT] Chargement du modèle...")
+        self.model = self._load_model()
+
+        print("[INIT] LLM prêt à l'emploi.")
+
+    def _authenticate(self):
+        hf_token = os.getenv("HUGGINGFACE_TOKEN")
+        if not hf_token:
+            raise ValueError("Token HF non trouvé dans .env")
+        login(token=hf_token)
+
+    def _load_tokenizer(self):
+        tokenizer = AutoTokenizer.from_pretrained(
+            self.model_id,
+            token=os.getenv("HUGGINGFACE_TOKEN")
         )
+        return tokenizer
 
-    def get_response(self) -> str:
-        return self.response.choices[0].text.strip()
-
-    def get_response_reason(self) -> Tuple[str, str]:
-        return (
-            self.response.choices[0].text.strip(),
-            self.response.choices[0].finish_reason.strip(),
+    def _load_model(self):
+        print("[MODEL] Chargement du modèle depuis Hugging Face...")
+        model = AutoModelForSeq2SeqLM.from_pretrained(
+            self.model_id,
+            device_map="auto",
+            torch_dtype=torch.float32,
+            token=os.getenv("HUGGINGFACE_TOKEN")
         )
+        print("[MODEL] Modèle chargé.")
+        return model
 
-    def print_response(self, char_width: int = 50, verbose: bool=True) -> None:
+    def generate(self, prompt: str, max_tokens: int = 80, verbose: bool = False) -> str:
+        print("[GENERATE] Génération du texte en cours...")
+        inputs = self.tokenizer(
+            prompt,
+            return_tensors="pt",
+            truncation=True,
+            padding=True
+        )
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
 
-        response = self.response.choices[0].text.strip()
-        to_print = textwrap.fill(response, char_width, subsequent_indent="\t")
+        print("[GENERATE] Appel au modèle...")
+        with torch.inference_mode():
+            outputs = self.model.generate(
+                **inputs,
+                max_new_tokens=max_tokens,
+                temperature=self.temp,
+                do_sample=True,
+                top_k=50,
+                top_p=0.9
+            )
+        print("[GENERATE] Texte généré")
+
+        response = self.tokenizer.decode(outputs[0], skip_special_tokens=True)
+
         if verbose:
-            print(f'Response:\n\t{to_print}')
+            self._print_formatted("Prompt", prompt)
+            self._print_formatted("Response", response)
         else:
-            print(to_print)
-            
+            print(response)
 
+        return response
 
-    def get_response_raw(self) -> CompletionResponse:
-        return self.response
-
+    def _print_formatted(self, title: str, content: str, width: int = 50):
+        wrapper = textwrap.TextWrapper(
+            width=width,
+            subsequent_indent="\t",
+            replace_whitespace=False
+        )
+        print(f"{title}:\n{wrapper.fill(content)}\n")
 
 class LLM_pretrained(LLM_eval):
-    def __init__(self, model="accounts/flowerai/models/mistral-7b", **kwargs) -> None:
-        super().__init__(model, **kwargs)
-
-
-class LLM_fl(LLM_eval):
-    def __init__(self, model="accounts/flowerai/models/mistral-7b-fl", **kwargs) -> None:
-        super().__init__(model, **kwargs)
-
-
-class LLM_cen_partial(LLM_eval):
-    def __init__(self, model="accounts/flowerai/models/mistral-7b-cen-10", **kwargs) -> None:
-        super().__init__(model, **kwargs)
-
-
-class LLM_cen(LLM_eval):
-    def __init__(self, model="accounts/flowerai/models/mistral-7b-cen-100", **kwargs) -> None:
-        super().__init__(model, **kwargs)
-
+    def __init__(self, **kwargs):
+        super().__init__(
+            model_id="google/flan-t5-base",
+            **kwargs
+        )

@@ -15,7 +15,12 @@ peft==0.6.2
 transformers==4.39.3
 ipywidgets==8.1.2
 gradio==3.50.2
-fireworks-ai==0.14.0
+
 scikit-learn==1.4.0
 cryptography==42.0.7
 python-dotenv~=1.0.1
+
+torch>=2.2.1
+accelerate>=0.30.0
+huggingface_hub>=0.19.4
+python-dotenv>=1.0.0
