@@ -14,7 +14,7 @@ load_dotenv()
 logging.set_verbosity_error()  # Réduire le logging verbeux
 
 class LLM_eval:
-    def __init__(self, model_id: str = "google/flan-t5-base", **kwargs):
+    def __init__(self, model_id: str = "meta-llama/Llama-2-7b-hf", **kwargs):
         print("[INIT] Initialisation de LLM_eval...")
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"[INIT] Device utilisé : {self.device}")
@@ -102,6 +102,6 @@ class LLM_eval:
 class LLM_pretrained(LLM_eval):
     def __init__(self, **kwargs):
         super().__init__(
-            model_id="google/flan-t5-base",
+            model_id="meta-llama/Llama-2-7b-hf",
             **kwargs
         )
